@@ -350,9 +350,20 @@ MainWindow::MainWindow(const QStringList& filenames) : rubberBandManager(this)
 
   // Replace the placeholder QWidget with actual ChatWidget
   QWidget *oldChatWidget = this->chatWidget;
-  this->chatWidget = new ChatWidget(this);
-  this->chatWidget->setObjectName("chatWidget");
-  this->chatWidget->setMinimumSize(250, 200);
+
+  auto *chat = new ChatWidget(this);
+
+  chat->setContextProviders(
+    [this]() { return this->getCurrentFileName(); },
+    [this]() { return this->activeEditor ? this->activeEditor->selectedText() : QString(); },
+    [this]() { return this->activeEditor ? this->activeEditor->toPlainText() : QString(); },
+    [this]() { QMetaObject::invokeMethod(this, "actionRenderPreview", Qt::QueuedConnection); }
+  );
+
+  chat->setObjectName("chatWidget");
+  chat->setMinimumSize(250, 200);
+
+  this->chatWidget = chat;
 
   // Replace in the layout
   QLayout *chatLayout = oldChatWidget->parentWidget()->layout();

@@ -1,5 +1,7 @@
 #include "ChatWidget.h"
+#include <qpushbutton.h>
 
+#include <utility>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QTextEdit>
@@ -37,6 +39,17 @@ ChatWidget::ChatWidget(QWidget *parent)
   conversationHistory.append(systemMessage);
 }
 
+void ChatWidget::setContextProviders(std::function<QString()> getFileName,
+                                     std::function<QString()> getSelection,
+                                     std::function<QString()> getDocumentText,
+                                     std::function<void()> triggerPreview)
+{
+  getFileName_ = std::move(getFileName);
+  getSelection_ = std::move(getSelection);
+  getDocumentText_ = std::move(getDocumentText);
+  triggerPreview_ = std::move(triggerPreview);
+}
+
 void ChatWidget::setupUI()
 {
   mainLayout = new QVBoxLayout(this);
@@ -57,6 +70,29 @@ void ChatWidget::setupUI()
 
   scrollArea->setWidget(messagesWidget);
   mainLayout->addWidget(scrollArea);
+
+  auto *ctxLayout = new QHBoxLayout();
+  includeScriptCheck = new QCheckBox("Include script", this);
+  selectionOnlyCheck = new QCheckBox("Selection only", this);
+  previewButton = new QPushButton("Preview", this);
+  previewButton->setMaximumWidth(80);
+
+  includeScriptCheck->setChecked(true);
+
+  ctxLayout->addWidget(includeScriptCheck);
+  ctxLayout->addWidget(selectionOnlyCheck);
+  ctxLayout->addStretch(1);
+  ctxLayout->addWidget(previewButton);
+  mainLayout->addLayout(ctxLayout);
+
+  connect(previewButton, &QPushButton::clicked, this, [this]() {
+    if (triggerPreview_) {
+      triggerPreview_();
+      addMessage("Preview requested.", false);
+    } else {
+      addMessage("Preview not available.", false)   ;
+    }
+  });
 
   // Input area
   auto *inputLayout = new QHBoxLayout();
@@ -89,24 +125,47 @@ void ChatWidget::sendMessage()
   inputField->clear();
   addMessage(message, true);
 
-  // Add user message to conversation history
+  // Persist ONLY the user's typed message in conversation history
   QJsonObject userMessage;
   userMessage["role"] = "user";
   userMessage["content"] = message;
   conversationHistory.append(userMessage);
 
+  // Build request messages: history WITHOUT the last user message, then context, then last user message
+  QJsonArray messages = conversationHistory;
+  messages.removeLast(); // remove the just-appended userMessage from the request temporarily
+
+  const QString ctx = buildContextBlock();
+  if (!ctx.isEmpty()) {
+    QJsonObject ctxMsg;
+    ctxMsg["role"] = "user";
+    ctxMsg["content"] = ctx;
+    messages.append(ctxMsg);    // ephemeral
+  }
+
+  messages.append(userMessage); // actual user question goes last
+
   // Prepare API request
   QJsonObject requestData;
   requestData["model"] = QString::fromStdString(S::aiModel.value());
-  requestData["messages"] = conversationHistory;
+  requestData["messages"] = messages;
   requestData["temperature"] = 0.7;
 
   QJsonDocument doc(requestData);
   QByteArray jsonData = doc.toJson();
 
-  QUrl url(QString::fromStdString(S::aiApiUrl.value()) + "/chat/completions");
+  // Robust URL join (handles trailing slash)
+  QUrl base(QString::fromStdString(S::aiApiUrl.value()));
+  if (base.scheme().isEmpty()) {
+    addMessage("❌ AI API URL is invalid (must start with http:// or https://)", false);
+    return;
+  }
+  if (!base.path().endsWith('/')) base.setPath(base.path() + '/');
+  QUrl url = base.resolved(QUrl("chat/completions"));
+
   QNetworkRequest request(url);
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
   const auto apiKey = QString::fromStdString(S::aiApiKey.value());
   if (!apiKey.isEmpty()) {
     request.setRawHeader("Authorization", ("Bearer " + apiKey).toUtf8());
@@ -121,7 +180,6 @@ void ChatWidget::sendMessage()
   connect(reply, &QNetworkReply::errorOccurred, this, &ChatWidget::onApiError);
 #endif
 
-  // Show loading message
   addMessage("🤔 Thinking...", false);
   sendButton->setEnabled(false);
 }
@@ -231,6 +289,31 @@ void ChatWidget::scrollToBottom()
 {
   QApplication::processEvents();
   scrollArea->verticalScrollBar()->setValue(scrollArea->verticalScrollBar()->maximum());
+}
+
+QString ChatWidget::clampText(const QString &s, int maxChars) {
+  if (s.size() <= maxChars) return s;
+  return s.left(maxChars) + "\n\n[...truncated...]\n";
+}
+
+QString ChatWidget::buildContextBlock() const
+{
+  if (!includeScriptCheck || !includeScriptCheck->isChecked()) return {};
+  if (!getDocumentText_) return {};
+
+  QString code;
+  if (selectionOnlyCheck && selectionOnlyCheck->isChecked() && getSelection_) {
+    code = getSelection_().trimmed();
+  }
+  if (code.isEmpty()) code = getDocumentText_().trimmed();
+  if (code.isEmpty()) return {};
+
+  code = clampText(code, 12000);
+
+  QString fileName = getFileName_ ? getFileName_() : "Untitled.scad";
+
+  return QString("[OpenSCAD Context]\nFile: %1\n\n```scad\n%2\n```\n")
+    .arg(fileName, code);
 }
 
 QString ChatWidget::formatMessage(const QString& text, bool isUser)

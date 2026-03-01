@@ -1,5 +1,7 @@
 #pragma once
 
+#include <qcheckbox.h>
+#include <qpushbutton.h>
 #include <QWidget>
 #include <QTextEdit>
 #include <QLineEdit>
@@ -14,6 +16,8 @@
 #include <QJsonArray>
 #include <QScrollArea>
 #include <QLabel>
+#include <QCheckBox>
+#include <functional>
 
 class ChatWidget : public QWidget
 {
@@ -22,6 +26,12 @@ class ChatWidget : public QWidget
 public:
   explicit ChatWidget(QWidget *parent = nullptr);
   ~ChatWidget() override = default;
+
+  // callbacks supplied by MainWindow
+  void setContextProviders(std::function<QString()> getFileName,
+                           std::function<QString()> getSelection,
+                           std::function<QString()> getDocumentText,
+                           std::function<void()> triggerPreview);
 
 private slots:
   void sendMessage();
@@ -43,4 +53,17 @@ private:
   QNetworkAccessManager *networkManager;
 
   QJsonArray conversationHistory;
+
+  // context providers
+  std::function<QString()> getFileName_;
+  std::function<QString()> getSelection_;
+  std::function<QString()> getDocumentText_;
+  std::function<void()> triggerPreview_;
+
+  QCheckBox *includeScriptCheck = nullptr;
+  QCheckBox *selectionOnlyCheck = nullptr;
+  QPushButton *previewButton = nullptr;
+
+  QString buildContextBlock() const;
+  static QString clampText(const QString &s, int maxChars);
 };
