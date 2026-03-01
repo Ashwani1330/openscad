@@ -18,6 +18,7 @@
 #include <QJsonArray>
 #include <QMessageBox>
 #include <QApplication>
+#include <QRegularExpression>
 
 #include "core/Settings.h"
 
@@ -42,12 +43,14 @@ ChatWidget::ChatWidget(QWidget *parent)
 void ChatWidget::setContextProviders(std::function<QString()> getFileName,
                                      std::function<QString()> getSelection,
                                      std::function<QString()> getDocumentText,
-                                     std::function<void()> triggerPreview)
+                                     std::function<void()> triggerPreview,
+                                     std::function<void(const QString&, bool)> applyCode)
 {
   getFileName_ = std::move(getFileName);
   getSelection_ = std::move(getSelection);
   getDocumentText_ = std::move(getDocumentText);
   triggerPreview_ = std::move(triggerPreview);
+  applyCode_ = std::move(applyCode);
 }
 
 void ChatWidget::setupUI()
@@ -76,12 +79,16 @@ void ChatWidget::setupUI()
   selectionOnlyCheck = new QCheckBox("Selection only", this);
   previewButton = new QPushButton("Preview", this);
   previewButton->setMaximumWidth(80);
+  applyButton = new QPushButton("Apply", this);
+  applyButton->setMaximumWidth(80);
+  applyButton->setEnabled(false); // enable only when we have code
 
   includeScriptCheck->setChecked(true);
 
   ctxLayout->addWidget(includeScriptCheck);
   ctxLayout->addWidget(selectionOnlyCheck);
   ctxLayout->addStretch(1);
+  ctxLayout->addWidget(applyButton);
   ctxLayout->addWidget(previewButton);
   mainLayout->addLayout(ctxLayout);
 
@@ -92,6 +99,46 @@ void ChatWidget::setupUI()
     } else {
       addMessage("Preview not available.", false)   ;
     }
+  });
+
+  connect(applyButton, &QPushButton::clicked, this, [this]() {
+    if (lastSuggestedCode_.trimmed().isEmpty()) {
+      addMessage("❌ No code to apply (ask the assistant to return a ```scad``` code block).", false);
+      return;
+    }
+    if (!applyCode_) {
+      addMessage("❌ Apply is not wired to the editor.", false);
+      return;
+    }
+
+    const bool wantSelection = (selectionOnlyCheck && selectionOnlyCheck->isChecked());
+
+    // If user wants selection, but selection is empty, ask what to do
+    if (wantSelection && getSelection_ && getSelection_().trimmed().isEmpty()) {
+      auto ret = QMessageBox::question(
+        this,
+        "No selection",
+        "Selection-only is enabled, but nothing is selected.\n\nApply to the entire document instead?",
+        QMessageBox::Yes | QMessageBox::No
+      );
+      if (ret != QMessageBox::Yes) return;
+      // fall back to full document apply
+      applyCode_(lastSuggestedCode_, false);
+      addMessage("✅ Applied to entire document. Click Preview to see the result.", false);
+      return;
+    }
+
+    const QString target = wantSelection ? "the selected text" : "the entire document";
+    auto ret = QMessageBox::question(
+      this,
+      "Apply AI suggestion",
+      "Replace " + target + " with the AI suggested code?",
+      QMessageBox::Yes | QMessageBox::No
+    );
+    if (ret != QMessageBox::Yes) return;
+
+    applyCode_(lastSuggestedCode_, wantSelection);
+    addMessage("✅ Applied to editor. Click Preview to see the result.", false);
   });
 
   // Input area
@@ -124,6 +171,10 @@ void ChatWidget::sendMessage()
 
   inputField->clear();
   addMessage(message, true);
+
+  // reset Apply state for this new round
+  lastSuggestedCode_.clear();
+  if (applyButton) applyButton->setEnabled(false);
 
   // Persist ONLY the user's typed message in conversation history
   QJsonObject userMessage;
@@ -216,6 +267,10 @@ void ChatWidget::onApiResponse()
 
         addMessage(content, false);
 
+        // Extract code block (```scad ... ```) from assistant and enable Apply if found
+        lastSuggestedCode_ = extractSuggestedCode(content);
+        if (applyButton) applyButton->setEnabled(!lastSuggestedCode_.trimmed().isEmpty());
+
         // Add assistant response to conversation history
         QJsonObject assistantMessage;
         assistantMessage["role"] = "assistant";
@@ -248,6 +303,8 @@ void ChatWidget::onApiError(QNetworkReply::NetworkError error)
     delete item;
   }
 
+  lastSuggestedCode_.clear();
+  if (applyButton) applyButton->setEnabled(false);
   addMessage("❌ Network error occurred", false);
 }
 
@@ -314,6 +371,28 @@ QString ChatWidget::buildContextBlock() const
 
   return QString("[OpenSCAD Context]\nFile: %1\n\n```scad\n%2\n```\n")
     .arg(fileName, code);
+}
+
+QString ChatWidget::extractSuggestedCode(const QString& assistantText)
+{
+  // 1) Prefer ```scad ... ```
+  {
+    QRegularExpression re(R"(```\s*scad\s*\n(.*?)\n```)",
+                          QRegularExpression::DotMatchesEverythingOption |
+                          QRegularExpression::CaseInsensitiveOption);
+    auto m = re.match(assistantText);
+    if (m.hasMatch()) return m.captured(1).trimmed();
+  }
+
+  // 2) Fallback: any ```lang? ... ```
+  {
+    QRegularExpression re(R"(```\s*[a-zA-Z0-9_-]*\s*\n(.*?)\n```)",
+                          QRegularExpression::DotMatchesEverythingOption);
+    auto m = re.match(assistantText);
+    if (m.hasMatch()) return m.captured(1).trimmed();
+  }
+
+  return {};
 }
 
 QString ChatWidget::formatMessage(const QString& text, bool isUser)

@@ -357,7 +357,20 @@ MainWindow::MainWindow(const QStringList& filenames) : rubberBandManager(this)
     [this]() { return this->getCurrentFileName(); },
     [this]() { return this->activeEditor ? this->activeEditor->selectedText() : QString(); },
     [this]() { return this->activeEditor ? this->activeEditor->toPlainText() : QString(); },
-    [this]() { QMetaObject::invokeMethod(this, "actionRenderPreview", Qt::QueuedConnection); }
+    [this]() { QMetaObject::invokeMethod(this, "actionRenderPreview", Qt::QueuedConnection); },
+
+    // NEW: apply code to editor
+    [this](const QString& code, bool applyToSelection) {
+      if (!this->activeEditor) return;
+
+      if (applyToSelection) {
+        // replace selection
+        this->activeEditor->replaceSelectedText(code);
+      } else {
+        // replace entire document
+        this->activeEditor->setText(code);
+      }
+    }
   );
 
   chat->setObjectName("chatWidget");

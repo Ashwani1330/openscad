@@ -31,7 +31,8 @@ public:
   void setContextProviders(std::function<QString()> getFileName,
                            std::function<QString()> getSelection,
                            std::function<QString()> getDocumentText,
-                           std::function<void()> triggerPreview);
+                           std::function<void()> triggerPreview,
+                           std::function<void(const QString&, bool)> applyCode);
 
 private slots:
   void sendMessage();
@@ -63,6 +64,14 @@ private:
   QCheckBox *includeScriptCheck = nullptr;
   QCheckBox *selectionOnlyCheck = nullptr;
   QPushButton *previewButton = nullptr;
+
+  std::function<void(const QString&, bool)> applyCode_;
+
+  QPushButton *applyButton = nullptr;
+
+  QString lastSuggestedCode_; // extracted from last assistant response
+
+  static QString extractSuggestedCode(const QString& assistantText);
 
   QString buildContextBlock() const;
   static QString clampText(const QString &s, int maxChars);
