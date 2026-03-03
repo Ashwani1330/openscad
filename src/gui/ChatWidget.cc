@@ -144,7 +144,7 @@ void ChatWidget::setupUI()
   // Input area
   auto *inputLayout = new QHBoxLayout();
   inputField = new QLineEdit(this);
-  inputField->setPlaceholderText("Ask GPT about OpenSCAD...");
+  inputField->setPlaceholderText("Ask AI about OpenSCAD...");
 
   sendButton = new QPushButton("Send", this);
   sendButton->setMaximumWidth(60);
@@ -397,6 +397,6 @@ QString ChatWidget::extractSuggestedCode(const QString& assistantText)
 
 QString ChatWidget::formatMessage(const QString& text, bool isUser)
 {
-  QString prefix = isUser ? "You: " : "GPT: ";
+  QString prefix = isUser ? "You: " : "AI: ";
   return prefix + text;
 }

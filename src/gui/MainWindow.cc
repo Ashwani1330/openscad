@@ -310,7 +310,7 @@ MainWindow::MainWindow(const QStringList& filenames) : rubberBandManager(this)
            {animateDock, _("Animate"), "view/hideAnimate"},
            {fontListDock, _("Font List"), "view/hideFontList"},
            {viewportControlDock, _("Viewport"), "view/hideViewportControl"},
-           {chatDock, _("GPT Chat"), "view/hideChat"}};
+           {chatDock, _("AI Chat"), "view/hideChat"}};
 
   this->versionLabel = nullptr;  // must be initialized before calling updateStatusBar()
   updateStatusBar(nullptr);
@@ -3465,7 +3465,15 @@ void MainWindow::onTabManagerEditorChanged(EditorInterface *newEditor)
   fontListDock->setNameSuffix(name);
   viewportControlDock->setNameSuffix(name);
   parameterDock->setNameSuffix(name);
-  chatDock->setNameSuffix(name);
+
+  const QString model = QString::fromStdString(Settings::Settings::aiModel.value()).trimmed();
+
+  QString chatSuffix = name; // keep active file name
+  if (!model.isEmpty()) {
+    chatSuffix = model + " — " + name;
+  }
+
+  chatDock->setNameSuffix(chatSuffix);
 
   // If there is no renderedEditor we request for a new preview.
   if (renderedEditor == nullptr) {
